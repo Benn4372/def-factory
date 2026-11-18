@@ -1,157 +1,229 @@
 """Player-facing Python runtime (runs inside the Pyodide worker).
 
-Phase 1: the terminal REPL, block objects mirrored from the layout, and the
-player's global namespace. Block behavior, the game clock and programs arrive
-in later phases (DESIGN.md §14).
+Glue between the UI and the engine: the player's global namespace, the
+terminal REPL, compiling player classes, and mirroring the layout.
 """
 
+import ast
 import asyncio
-import traceback
+import builtins
+import re
 
 from pyodide.code import eval_code_async
 
+import engine
 import safety
+from engine import CLASS_NAMES, Block, Item, current_block, format_error, world
 from safety import SafetyError, TooLongWithoutAwait, watchdog
 
 N, S, E, W = "north", "south", "east", "west"
-
-CLASS_NAMES = {
-    "source": "Source", "belt": "Belt", "splitter": "Splitter", "merger": "Merger",
-    "warehouse": "Warehouse", "crafter": "Crafter", "sell": "Sell",
-}
+G = {}               # the player's global namespace (terminal + classes)
+blocks = {}          # name -> block, exposed as `blocks`
 
 
-# --------------------------------------------------------------------- blocks
-
-class Block:
-    """A placed block as seen from Python. Name, kind and position mirror the
-    layout and are read-only from code; any other attribute you set is kept on
-    the object (per-block state, e.g. `belt_3.direction = "north"`)."""
-
-    _READ_ONLY = {"name", "kind", "pos", "x", "y", "id"}
-
-    def __init__(self, data):
-        object.__setattr__(self, "_data", {})
-        self._update(data)
-
-    def _update(self, data):
-        self._data.update(data)
-
-    @property
-    def name(self): return self._data["name"]
-
-    @property
-    def kind(self): return self._data["kind"]
-
-    @property
-    def x(self): return self._data["x"]
-
-    @property
-    def y(self): return self._data["y"]
-
-    @property
-    def pos(self): return (self.x, self.y)
-
-    @property
-    def id(self): return self._data["id"]
-
-    def __setattr__(self, key, value):
-        if key in self._READ_ONLY:
-            hint = " Rename blocks in the Inspector." if key == "name" else " Drag the block to move it."
-            raise AttributeError(f"`{key}` is read-only.{hint if key in ('name', 'x', 'y', 'pos') else ''}")
-        object.__setattr__(self, key, value)
-
-    def __repr__(self):
-        return f"<{CLASS_NAMES.get(self.kind, self.kind)} {self.name} at {self.pos}>"
-
-
-_by_id = {}          # layout id -> Block
-blocks = {}          # name -> Block (exposed to the player)
-G = {}               # the player's global namespace
-_money = [0]
-
+# --------------------------------------------------------------------- layout
 
 def sync(layout):
-    """Called by the worker whenever the layout changes in the UI."""
+    """Mirror the UI's layout. New blocks get on_place; moved or deleted blocks
+    lose whatever they held."""
     layout = layout.to_py() if hasattr(layout, "to_py") else layout
     seen = set()
+    created = []
     for data in layout["blocks"]:
         bid = data["id"]
         seen.add(bid)
-        b = _by_id.get(bid)
+        b = world.by_id.get(bid)
         if b is None:
-            b = _by_id[bid] = Block(data)
+            b = world.by_id[bid] = world.make_block(data)
+            created.append(b)
         else:
-            old = b.name
-            b._update(data)
-            if old != b.name and G.get(old) is b:
-                del G[old]
-    for bid in list(_by_id):
+            old = dict(b._data)
+            b._data.update(data)
+            if old["name"] != b.name and G.get(old["name"]) is b:
+                del G[old["name"]]
+            if (old["x"], old["y"]) != (b.x, b.y):
+                world.drop_items_of(b)
+    for bid in list(world.by_id):
         if bid not in seen:
-            gone = _by_id.pop(bid)
+            gone = world.by_id.pop(bid)
+            world.drop_items_of(gone)
             if G.get(gone.name) is gone:
                 del G[gone.name]
+    world.rebuild_tiles()
     blocks.clear()
-    for b in _by_id.values():
+    for b in world.by_id.values():
         blocks[b.name] = b
         G[b.name] = b
-    _money[0] = layout["money"]
     G["money"] = layout["money"]
+    for b in created:
+        _run_on_place(b)
+
+
+def _on_place_signature(b):
+    fn = getattr(type(b), "on_place", None)
+    code = getattr(fn, "__code__", None)
+    return None if code is None else (code.co_code, repr(code.co_consts), code.co_names)
+
+
+def _run_on_place(b):
+    b.__dict__["_on_place_sig"] = _on_place_signature(b)
+    watchdog.arm()
+    world.call_hook(b, "on_place")
+
+
+def configure(cfg):
+    cfg = cfg.to_py() if hasattr(cfg, "to_py") else cfg
+    world.prices = {name: info["sell"] for name, info in cfg["items"].items()}
+    world.item_names = set(cfg["items"])
+
+
+# -------------------------------------------------------------------- classes
+
+_LINE_RE = re.compile(r"line (\d+)")
+
+
+def save_class(kind, src):
+    """Compile a player class and hot-swap it onto every block of that kind.
+    On failure the previous class keeps running."""
+    name = CLASS_NAMES[kind]
+    filename = f"<class:{name}>"
+    try:
+        tree = safety.check(src, filename=filename)
+        if not any(isinstance(n, ast.ClassDef) and n.name == name for n in tree.body):
+            raise SafetyError(f"line 1: this code must define `class {name}:`")
+        ns = dict(G)  # class bodies see the player's globals...
+        watchdog.arm()
+        exec(compile(src, filename, "exec"), ns)
+        cls = ns[name]
+        if not isinstance(cls, type):
+            raise SafetyError(f"line 1: `{name}` must be a class")
+        cls.__module__ = "__main__"
+        # ...and methods keep seeing live globals (new blocks, money, ...).
+        for k, v in ns.items():
+            if k not in G or k == name:
+                G[k] = v
+        _rebind_globals(cls)
+    except BaseException as e:  # noqa: BLE001
+        msg = format_error(e)
+        m = _LINE_RE.search(msg)
+        return {"ok": False, "error": msg, "line": int(m.group(1)) if m else None}
+
+    world.set_class(kind, cls)
+    # on_place runs again on existing blocks only when on_place itself changed,
+    # so setting a direction from the terminal survives edits to on_receive.
+    for b in list(world.by_id.values()):
+        if b.kind == kind and b.__dict__.get("_on_place_sig") != _on_place_signature(b):
+            _run_on_place(b)
+    return {"ok": True}
+
+
+def _rebind_globals(cls):
+    """Point the class's functions at the shared namespace G so they see
+    blocks placed later, renames, and `money` updates."""
+    import types
+    for attr, fn in list(vars(cls).items()):
+        target = fn
+        if isinstance(fn, (staticmethod, classmethod)):
+            target = fn.__func__
+        if isinstance(target, types.FunctionType):
+            new = types.FunctionType(target.__code__, G, target.__name__, target.__defaults__, target.__closure__)
+            new.__kwdefaults__ = target.__kwdefaults__
+            new.__qualname__ = target.__qualname__
+            if isinstance(fn, staticmethod):
+                new = staticmethod(new)
+            elif isinstance(fn, classmethod):
+                new = classmethod(new)
+            setattr(cls, attr, new)
 
 
 # ------------------------------------------------------------------- globals
 
 async def wait(seconds):
-    """Pause for `seconds`. (Real time in Phase 1; game time from Phase 2.)"""
+    """Pause for `seconds` of game time (stops while the game is paused)."""
     if not isinstance(seconds, (int, float)) or seconds < 0:
         raise ValueError("wait() needs a number of seconds >= 0")
-    await asyncio.sleep(seconds)
+    await world.wait_future(seconds)
+
+
+def game_time():
+    """Seconds of game time since the page loaded."""
+    return round(world.time, 3)
+
+
+def spawn(item_name, block):
+    """Debug helper: create an item directly inside a block (until Sources
+    can order supplies in Phase 3). Returns the item."""
+    if item_name not in world.item_names:
+        raise ValueError(f"unknown item {item_name!r}; try one of {', '.join(sorted(world.item_names))}")
+    if isinstance(block, str):
+        block = blocks.get(block)
+    if not isinstance(block, Block) or block.id not in world.by_id:
+        raise ValueError("spawn(item_name, block): block must be a block or a block name")
+    if block._room() <= 0:
+        raise ValueError(f"{block.name} is full")
+    item = Item(item_name)
+    block._held.append(item)
+    world.call_hook(block, "on_receive", item)
+    return item
+
+
+def _print(*args, sep=" ", end="\n", file=None, flush=False):
+    text = sep.join(str(a) for a in args)
+    b = current_block.get()
+    builtins.print(f"[{b.name}] {text}" if b is not None else text, end=end)
 
 
 def _help(*args):
     print(
         "def factory() terminal\n"
-        "  blocks            dict of every block by name\n"
-        "  <block name>      e.g. warehouse_1 — every block is a variable\n"
-        "  money             your current money\n"
-        "  await wait(s)     pause for s seconds (top-level await works here)\n"
-        "  Shift+Enter: new line · Enter on an empty line runs a block · Ctrl+C: stop · Ctrl+L: clear\n"
-        "Block behavior (classes) arrives in Phase 2."
+        "  blocks                dict of every block by name; each block is also a variable\n"
+        "  belt_1.items          items a block is holding\n"
+        "  spawn('iron', belt_1) put an item into a block (debug, until Phase 3)\n"
+        "  money, time()         your money; game time in seconds\n"
+        "  await wait(s)         pause for s game seconds\n"
+        "Write behavior in the Classes tab: one class per block type, e.g.\n"
+        "  class Belt:\n"
+        "      def on_place(self): self.direction = 'east'\n"
+        "      def on_receive(self, item): self.push(item, self.direction)\n"
+        "Shift+Enter: new line · Enter on an empty line runs a block · Ctrl+C: stop · Ctrl+L: clear"
     )
 
 
-def _reset_namespace():
-    G.clear()
-    G.update({
-        "__name__": "__main__",
-        "blocks": blocks,
-        "wait": wait,
-        "help": _help,
-        "N": N, "S": S, "E": E, "W": W,
-        "money": _money[0],
-    })
-    for b in _by_id.values():
-        G[b.name] = b
+G.update({
+    "__name__": "__main__",
+    "__builtins__": builtins,
+    "print": _print,
+    "blocks": blocks,
+    "wait": wait,
+    "time": game_time,
+    "spawn": spawn,
+    "help": _help,
+    "N": N, "S": S, "E": E, "W": W,
+    "money": 0,
+})
 
 
-_reset_namespace()
+# --------------------------------------------------------------------- engine
+
+def step(n=1):
+    for _ in range(int(n)):
+        world.step()
+
+
+def snapshot(selected_id=None, persist=False):
+    snap = world.snapshot(selected_id)
+    if persist:
+        snap["persist"] = world.persistable_attrs()
+    return snap
+
+
+def restore_attrs(saved):
+    world.restore_attrs(saved.to_py() if hasattr(saved, "to_py") else saved)
 
 
 # ---------------------------------------------------------------------- REPL
 
 _current = None  # the running terminal task, so Ctrl+C can cancel it
-
-
-def _format_error(e):
-    """One or two readable lines: where in the player's code, and what."""
-    tb = traceback.extract_tb(e.__traceback__)
-    player = [f for f in tb if f.filename.startswith(safety.PLAYER_PREFIXES)]
-    where = f"line {player[-1].lineno}: " if player else ""
-    name = type(e).__name__
-    msg = str(e)
-    return f"{where}{name}: {msg}" if msg else f"{where}{name}"
-
-
 MAX_REPR = 4000
 
 
@@ -181,9 +253,9 @@ async def repl(src):
     except asyncio.CancelledError:
         return {"ok": False, "kind": "cancelled", "error": "KeyboardInterrupt: stopped"}
     except (TooLongWithoutAwait, SafetyError) as e:
-        return {"ok": False, "kind": "watchdog", "error": _format_error(e)}
+        return {"ok": False, "kind": "watchdog", "error": format_error(e)}
     except BaseException as e:  # noqa: BLE001 — player errors must never escape
-        return {"ok": False, "kind": "error", "error": _format_error(e)}
+        return {"ok": False, "kind": "error", "error": format_error(e)}
     finally:
         _current = None
 

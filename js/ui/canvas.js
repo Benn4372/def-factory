@@ -1,6 +1,9 @@
 // Grid rendering and mouse/keyboard input for placing, selecting, moving and deleting blocks.
 
-import { GRID, BLOCKS } from '../config.js';
+import { GRID, BLOCKS, ITEMS } from '../config.js';
+
+const DIRS = { north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0] };
+const TRANSIT_SECONDS = 0.5; // matches engine.TRANSIT
 
 export class GridView {
   constructor(canvas, world, ui) {
@@ -143,11 +146,17 @@ export class GridView {
     ctx.stroke();
 
     // blocks (the one being dragged is drawn faded at its old spot)
+    const sim = this.ui.sim;
+    const byId = new Map();
     for (const b of this.world.blocks.values()) {
+      byId.set(b.id, b);
       const dragging = this.drag?.moved && this.drag.block === b;
       this.drawBlock(b.kind, b.x, b.y, dragging ? 0.3 : 1, b.name);
+      const state = sim?.snap.blocks[b.id];
+      if (state) this.drawState(b, state);
       if (b === this.ui.selected) this.outline(b.kind, b.x, b.y, '#6cc4ff');
     }
+    if (sim) this.drawTransits(sim, byId);
 
     // placement ghost
     if (this.ui.placing && this.hover) {
@@ -189,6 +198,94 @@ export class GridView {
       ctx.fillText(name, (x + s / 2) * p, (y + s / 2) * p + p * 0.4);
     }
     ctx.globalAlpha = 1;
+  }
+
+  // Direction arrow, "no direction" badge, held items, error outline.
+  drawState(b, state) {
+    const { ctx } = this;
+    const p = this.pxPerTile;
+    const s = BLOCKS[b.kind].size;
+    const cx = (b.x + s / 2) * p, cy = (b.y + s / 2) * p;
+    const directed = ['belt', 'splitter', 'merger'].includes(b.kind);
+
+    if (state.dir) {
+      const [dx, dy] = DIRS[state.dir];
+      ctx.save();
+      ctx.translate(cx + dx * p * 0.3, cy + dy * p * 0.3);
+      ctx.rotate(Math.atan2(dy, dx));
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.beginPath();
+      ctx.moveTo(p * 0.13, 0);
+      ctx.lineTo(-p * 0.07, -p * 0.12);
+      ctx.lineTo(-p * 0.07, p * 0.12);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    } else if (directed) {
+      this.badge(b.x + 1, b.y, '?', '#f2c94c');
+    }
+
+    // items sitting in the block
+    const held = state.held || [];
+    held.slice(0, 4).forEach((name, i) => {
+      const ox = held.length === 1 ? 0 : ((i % 2) - 0.5) * p * 0.3;
+      const oy = held.length === 1 ? 0 : (Math.floor(i / 2) - 0.5) * p * 0.3;
+      this.drawItem(name, cx + ox, cy + oy, held.length === 1 ? 0.42 : 0.26);
+    });
+    if (state.n > 4) this.badge(b.x + s, b.y + s - 0.4, String(state.n), '#e3e6ec');
+
+    if (state.err) this.outline(b.kind, b.x, b.y, '#ff6b6b');
+  }
+
+  // Items moving between blocks, extrapolated between snapshots for smooth motion.
+  drawTransits(sim, byId) {
+    const p = this.pxPerTile;
+    const elapsed = (performance.now() - sim.at) / 1000;
+    const advance = sim.speed > 0 ? (elapsed * sim.speed) / TRANSIT_SECONDS : 0;
+    for (const it of sim.snap.items) {
+      const a = byId.get(it.src), b = byId.get(it.dst);
+      if (!a || !b) continue;
+      const t = Math.min(1, it.p + advance);
+      const sa = BLOCKS[a.kind].size, sb = BLOCKS[b.kind].size;
+      const ax = (a.x + sa / 2) * p, ay = (a.y + sa / 2) * p;
+      const bx = (b.x + sb / 2) * p, by = (b.y + sb / 2) * p;
+      this.drawItem(it.name, ax + (bx - ax) * t, ay + (by - ay) * t, 0.42);
+    }
+  }
+
+  drawItem(name, x, y, frac) {
+    const { ctx } = this;
+    const p = this.pxPerTile;
+    const w = p * frac;
+    ctx.fillStyle = ITEMS[name]?.color || '#ddd';
+    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+    ctx.lineWidth = Math.max(1, p * 0.03);
+    roundRect(ctx, x - w / 2, y - w / 2, w, w, w * 0.18);
+    ctx.fill();
+    ctx.stroke();
+    if (frac >= 0.4) {
+      ctx.fillStyle = '#111';
+      ctx.font = `700 ${Math.round(w * 0.5)}px ui-monospace, Consolas, monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(name[0].toUpperCase(), x, y + 1);
+    }
+  }
+
+  badge(tx, ty, text, color) {
+    const { ctx } = this;
+    const p = this.pxPerTile;
+    const r = p * 0.17;
+    const x = tx * p - r * 0.9, y = ty * p + r * 0.9;
+    ctx.fillStyle = '#111';
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = color;
+    ctx.font = `700 ${Math.round(r * 1.4)}px ui-monospace, Consolas, monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x, y + 1);
   }
 
   outline(kind, x, y, color) {

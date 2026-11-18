@@ -1,6 +1,6 @@
 # def factory() — Proof of Concept Design Document
 
-**Status:** Draft v1 · 2026-11-18 · Phases 0–1 complete
+**Status:** Draft v1 · 2026-11-18 · Phases 0–2 complete
 **Platform:** Browser (GitHub Pages), vanilla JS + Pyodide
 **Scope:** Proof of concept (PoC). Future ideas are listed in §14 and are explicitly *out of scope*.
 
@@ -157,9 +157,9 @@ Money can't go negative: an `order()` or placement you can't afford fails (retur
   - Source, Warehouse and Crafter may only push onto a **Belt, Splitter or Merger** (never directly into each other).
   - Belt, Splitter and Merger may push into any block that accepts it.
 - **Who accepts from which side:**
-  - **Belt:** only from directly behind it (the side opposite `self.direction`).
+  - **Belt:** from behind and both sides, never its front. *(Changed in Phase 2: behind-only meant a belt line could never turn a corner without a Splitter.)*
   - **Splitter:** only from behind.
-  - **Merger:** from behind and both sides.
+  - **Merger:** from behind and both sides (currently the same as a Belt; see §16).
   - **Warehouse, Crafter, Sell:** from any side.
 - `can_accept(self, item, from_direction)` is an optional hook on every class. Return `False` to refuse an item (it waits upstream). Default: accept if there's room.
 
@@ -169,7 +169,7 @@ Hooks may be `def` or `async def`. Async hooks run as background tasks.
 
 | Hook | When it fires |
 |---|---|
-| `on_place(self)` | Block placed (not on move) |
+| `on_place(self)` | Block placed (not on move); also re-run on existing blocks when the class's `on_place` code changes, and for every block after a worker restart (then backed-up attributes are restored on top) |
 | `on_receive(self, item)` | An item arrives |
 | `can_accept(self, item, from_direction)` | Before an item is delivered (must be sync, must be fast) |
 | `on_craft_done(self, item)` | Crafter only: an item finished |
@@ -321,11 +321,11 @@ Parse with Python's `ast` and refuse to run with a clear message and line number
 - **Recursion limit:** 150 nested player-code calls (counted by the watchdog, so Pyodide's own stack isn't affected).
 - Watchdog stops derive from `BaseException`, so a player's `except Exception:` can't swallow them. The tracer stays armed between calls so player tasks resumed by the event loop are watched too.
 - **Output limit:** terminal print rate capped (excess lines dropped with a notice).
-- **Isolation:** Pyodide and the simulation run in a **Web Worker**. The UI thread never runs player code, so the page always stays responsive. If the worker stops responding for 3 s anyway, the UI terminates and restarts it, restoring the layout, classes, programs and instance attributes from the last snapshot (items in the world are lost) and shows a message. *(Phase 1 restores only the layout; terminal variables and block attributes are lost. Snapshotting classes, programs and instance attributes comes with Phase 2/4, when they exist.)*
+- **Isolation:** Pyodide and the simulation run in a **Web Worker**. The UI thread never runs player code, so the page always stays responsive. If the worker stops responding for 3 s anyway, the UI terminates and restarts it, restoring the layout, classes, programs and instance attributes from the last snapshot (items in the world are lost) and shows a message. *(As built in Phase 2: saved classes are re-sent, `on_place` re-runs, then block attributes that are plain JSON data are restored from a backup taken every second. Attributes holding items or blocks, and terminal variables, are lost. Programs join this in Phase 4.)*
 
 ### 10.3 Errors
 - A block whose hook raises turns **red**, stops firing hooks, and shows the error in the inspector and terminal. Other blocks keep running.
-- Fixing and saving the class clears the error on all affected blocks (they resume).
+- Fixing and saving the class clears the error on all affected blocks (they resume) and re-runs `on_receive` for items they were holding that hadn't been pushed on.
 - A program that raises stops and shows the error.
 
 ---
@@ -421,7 +421,8 @@ def-factory/
 │       ├── blocks.js        # built-in behavior per block type
 │       └── economy.js
 ├── py/
-│   ├── runtime.py           # block base proxies, globals, scheduler, wait()
+│   ├── engine.py            # clock, items, Block built-ins, movement, hooks, snapshots
+│   ├── runtime.py           # globals, class compiling + hot-swap, layout sync, REPL
 │   ├── safety.py            # ast pre-check, settrace watchdog
 │   └── templates/           # empty class templates per block type
 ├── guide/                   # guide pages (.md)
@@ -451,7 +452,7 @@ Each phase ends with something playable and deployed to GitHub Pages.
 - Pre-check and watchdog, worker restart.
 - **Done when:** `while True: pass` in the terminal is refused, a sneaky infinite loop is stopped in ≤ 50 ms, and the page never freezes.
 
-### Phase 2: Engine, belts and classes
+### Phase 2: Engine, belts and classes ✅
 - Clock (20 Hz), pause/speed, items, `push` and adjacency rules, back-ups, animation.
 - Classes tab with empty templates, hooks, hot-swap, red-block errors.
 - Belt, Splitter, Merger, Sell (with a debug "spawn item" command).
@@ -495,3 +496,5 @@ Each phase ends with something playable and deployed to GitHub Pages.
 | Warehouse model | Slots + timed `look()` is the PoC choice; the long-term model is undecided. |
 | Balance | All numbers live in `config.js`. |
 | Hidden-queue size | Unlimited in PoC; may need a cap if ordering huge amounts becomes an exploit. |
+| Merger vs Belt | Since belts now take items from their sides, a Merger behaves exactly like a Belt. Options: drop it, or give it something distinct (e.g. a small buffer, or fair round-robin between inputs). Open. |
+| Browser caching | GitHub Pages caches files for ~10 minutes, so right after a deploy a visitor can get a mix of old and new modules. Hard-refresh fixes it; versioned file names would fix it properly. |
