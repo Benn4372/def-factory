@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>def factory()</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header id="topbar">
+    <div class="title"><span class="kw">def</span> factory<span class="paren">()</span></div>
+    <div class="money" id="money">$500</div>
+    <div class="sim-controls" title="Simulation controls arrive in Phase 2">
+      <button disabled>⏸</button>
+      <button disabled class="active">1×</button>
+      <button disabled>2×</button>
+      <button disabled>4×</button>
+      <span class="clock">t = 00:00</span>
+    </div>
+    <div class="spacer"></div>
+    <button id="guide-btn">Guide</button>
+    <button id="panel-toggle" title="Show/hide side panel">Panel</button>
+  </header>
+
+  <main id="layout">
+    <aside id="palette"></aside>
+
+    <section id="stage">
+      <canvas id="grid"></canvas>
+      <div id="hint">Pick a block on the left, then click the grid. Drag to move, right-click to delete, Esc to cancel.</div>
+    </section>
+
+    <aside id="sidepanel">
+      <nav class="tabs">
+        <button data-tab="classes">Classes</button>
+        <button data-tab="programs">Programs</button>
+        <button data-tab="inspector" class="active">Inspector</button>
+        <button data-tab="guide">Guide</button>
+        <button id="panel-close" title="Close panel">✕</button>
+      </nav>
+      <div class="tab-body" id="tab-classes" hidden>
+        <p class="placeholder">Class editors for each block type arrive in <b>Phase 2</b>.</p>
+      </div>
+      <div class="tab-body" id="tab-programs" hidden>
+        <p class="placeholder">Programs (<code>async def main()</code>) arrive in <b>Phase 4</b>.</p>
+      </div>
+      <div class="tab-body" id="tab-inspector"></div>
+      <div class="tab-body" id="tab-guide" hidden>
+        <p class="placeholder">The coding guide arrives in <b>Phase 5</b>. For now: place blocks, drag them around, and rename them in the Inspector. Names become Python variables later.</p>
+      </div>
+    </aside>
+  </main>
+
+  <footer id="terminal">
+    <div class="term-title">Terminal <span class="dim">(Python arrives in Phase 1)</span></div>
+    <div id="term-log"></div>
+  </footer>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
