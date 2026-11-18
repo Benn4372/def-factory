@@ -8,6 +8,7 @@ export function buildPanels(world, ui) {
 
   function showTab(name) {
     layout.classList.remove('panel-closed');
+    if (name === 'classes') ui.onClassesShown?.();
     for (const t of tabs) t.classList.toggle('active', t.dataset.tab === name);
     for (const body of document.querySelectorAll('.tab-body')) body.hidden = body.id !== `tab-${name}`;
   }
@@ -25,6 +26,7 @@ export function buildPanels(world, ui) {
     const b = ui.selected;
     if (b === shownBlock && b) { updateLive(); return; }
     shownBlock = b;
+    lastSimText = '';
 
     if (!b) {
       insp.innerHTML = `<p class="placeholder">Click a block to inspect it.</p>`;
@@ -38,8 +40,9 @@ export function buildPanels(world, ui) {
       <div class="insp-row"><span class="label">Position</span><span id="insp-pos"></span></div>
       <div class="insp-row"><span class="label">Size</span><span>${def.size}×${def.size}</span></div>
       <div class="insp-row"><span class="label">Refund</span><span id="insp-refund"></span></div>
-      <p class="dim" style="margin:12px 0 6px">In code (from Phase 1) this block is:</p>
+      <p class="dim" style="margin:12px 0 6px">In code this block is:</p>
       <div class="insp-code" id="insp-code"></div>
+      <div id="insp-sim"></div>
       <p style="margin-top:16px"><button class="danger" id="insp-del">Delete block</button></p>`;
 
     const input = insp.querySelector('#insp-name');
@@ -82,6 +85,25 @@ export function buildPanels(world, ui) {
     if (document.activeElement !== input) input.value = b.name;
   }
 
+  // Live state from the simulation for the selected block.
+  let lastSimText = '';
+  function updateSim(sel) {
+    const el = insp.querySelector('#insp-sim');
+    if (!el || !ui.selected) return;
+    if (!sel || sel.id !== ui.selected.id) { el.innerHTML = ''; lastSimText = ''; return; }
+    const text = JSON.stringify(sel);
+    if (text === lastSimText) return; // avoid rewriting the DOM 20 times a second
+    lastSimText = text;
+    const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    const attrs = Object.entries(sel.attrs || {});
+    el.innerHTML = `
+      ${sel.err ? `<p class="dim" style="margin:12px 0 4px">Error (block stopped):</p><div class="insp-err">${esc(sel.err)}</div>` : ''}
+      <p class="dim" style="margin:12px 0 4px">Holding ${sel.held.length}${sel.pending ? ` · ${sel.pending} waiting to move` : ''}</p>
+      <div class="insp-attrs">${sel.held.map((h) => `<div>${esc(h)}</div>`).join('') || '<div class="dim">nothing</div>'}</div>
+      <p class="dim" style="margin:12px 0 4px">Attributes (self.…)</p>
+      <div class="insp-attrs">${attrs.map(([k, v]) => `<div>${esc(k)} = ${esc(v)}</div>`).join('') || '<div class="dim">none set</div>'}</div>`;
+  }
+
   world.onChange(renderInspector);
-  return { renderInspector, showTab };
+  return { renderInspector, showTab, updateSim };
 }

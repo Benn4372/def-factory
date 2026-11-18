@@ -4,18 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>def factory()</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header id="topbar">
     <div class="title"><span class="kw">def</span> factory<span class="paren">()</span></div>
     <div class="money" id="money">$500</div>
-    <div class="sim-controls" title="Simulation controls arrive in Phase 2">
-      <button disabled>⏸</button>
-      <button disabled class="active">1×</button>
-      <button disabled>2×</button>
-      <button disabled>4×</button>
-      <span class="clock">t = 00:00</span>
+    <div class="sim-controls">
+      <button data-speed="0" title="Pause (game time stops)">⏸</button>
+      <button data-speed="1" class="active">1×</button>
+      <button data-speed="2">2×</button>
+      <button data-speed="4">4×</button>
+      <span class="clock" id="clock">t = 00:00</span>
     </div>
     <div class="spacer"></div>
     <button id="guide-btn">Guide</button>
@@ -38,22 +42,27 @@
         <button data-tab="guide">Guide</button>
         <button id="panel-close" title="Close panel">✕</button>
       </nav>
-      <div class="tab-body" id="tab-classes" hidden>
-        <p class="placeholder">Class editors for each block type arrive in <b>Phase 2</b>.</p>
-      </div>
+      <div class="tab-body" id="tab-classes" hidden></div>
       <div class="tab-body" id="tab-programs" hidden>
         <p class="placeholder">Programs (<code>async def main()</code>) arrive in <b>Phase 4</b>.</p>
       </div>
       <div class="tab-body" id="tab-inspector"></div>
       <div class="tab-body" id="tab-guide" hidden>
-        <p class="placeholder">The full coding guide arrives in <b>Phase 5</b>. For now, try the terminal at the bottom:</p>
-        <pre class="insp-code">help()
-blocks
-warehouse_1.pos
-belt_1.direction = "north"
-belt_1.direction
-await wait(1); print("done")</pre>
-        <p class="placeholder">Every block is a Python variable named after it (rename it in the Inspector). Loops that never wait are refused or stopped, so they can't freeze the page.</p>
+        <p class="placeholder">The full coding guide arrives in <b>Phase 5</b>. Quick start:</p>
+        <p>1. Place a few belts in a row ending in a Sell block.</p>
+        <p>2. In <b>Classes → Belt</b>, write and save (Ctrl+S):</p>
+        <pre class="insp-code">class Belt:
+    def on_place(self):
+        self.direction = "east"
+
+    def on_receive(self, item):
+        self.push(item, self.direction)</pre>
+        <p>3. In <b>Classes → Sell</b>:</p>
+        <pre class="insp-code">class Sell:
+    def on_receive(self, item):
+        self.sell(item)</pre>
+        <p>4. In the terminal: <code>spawn("gear", belt_1)</code></p>
+        <p class="placeholder">Each block is its own object: turn one belt with <code>belt_3.direction = "north"</code>. Belts take items from behind or either side (so lines can turn corners) and push only forward; Splitters take only from behind and can push forward, left or right; Mergers work like belts. A full block makes items wait behind it. If your code raises an error, that block turns red and stops until you save a fixed class. <code>help()</code> lists more.</p>
       </div>
     </aside>
   </main>

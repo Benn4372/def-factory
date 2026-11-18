@@ -137,6 +137,7 @@ code { font-family: var(--mono); color: var(--accent); }
 .tabs button { padding: 4px 8px; font-size: 13px; }
 #panel-close { margin-left: auto; }
 .tab-body { padding: 12px; overflow-y: auto; }
+#layout { grid-template-columns: 150px 1fr clamp(300px, 30vw, 460px); }
 .placeholder { color: var(--dim); }
 
 /* Inspector */
@@ -203,3 +204,24 @@ code { font-family: var(--mono); color: var(--accent); }
   padding: 2px 0;
 }
 pre.insp-code { margin: 8px 0; white-space: pre-wrap; color: var(--text); }
+#tab-guide p { margin: 8px 0; }
+
+/* Classes tab */
+#tab-classes { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1; padding: 8px; }
+#tab-classes[hidden] { display: none; }
+.cls-kinds { display: flex; flex-wrap: wrap; gap: 4px; }
+.cls-kinds button { font-size: 12px; padding: 3px 7px; }
+.cls-kinds button.dirty::after { content: ' •'; color: var(--money); }
+.cls-kinds button.bad { border-color: var(--bad); color: var(--bad); }
+.cls-editor { flex: 1; min-height: 200px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.cls-editor .CodeMirror { height: 100%; font: 13px/1.45 var(--mono); }
+.cm-error-line { background: rgba(255, 107, 107, 0.18) !important; }
+.cls-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+#cls-status { font-size: 12px; font-family: var(--mono); }
+#cls-status.bad { color: var(--bad); }
+#cls-status.good { color: var(--good); }
+
+/* Inspector sim info */
+.insp-err { color: var(--bad); font-family: var(--mono); font-size: 12px; white-space: pre-wrap; margin: 6px 0; }
+.insp-attrs { font-family: var(--mono); font-size: 12px; }
+.insp-attrs div { white-space: pre-wrap; word-break: break-all; }

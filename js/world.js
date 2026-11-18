@@ -109,6 +109,12 @@ export class World {
     return { ok: true, refund };
   }
 
+  // Money earned in the simulation (e.g. selling).
+  addMoney(amount) {
+    this.money = Math.round((this.money + amount) * 100) / 100;
+    this.emit();
+  }
+
   // Plain-data copy of the layout for the Python worker.
   snapshot() {
     return {
