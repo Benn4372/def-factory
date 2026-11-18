@@ -2,6 +2,8 @@
 
 A 2D top-down sandbox factory where every block runs a Python class you write. Order supplies, store them, craft parts, sell them — nothing moves unless your code moves it.
 
+**Play it:** https://benn4372.github.io/def-factory/
+
 See [DESIGN.md](DESIGN.md) for the full design and build phases.
 
 ## Status
@@ -41,4 +43,4 @@ js/
 
 ## Deploying
 
-Plain static files with no build step; serve the repo root with GitHub Pages.
+Plain static files with no build step. GitHub Pages serves the root of `main`, so every push to `main` redeploys the live site.
