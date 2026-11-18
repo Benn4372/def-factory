@@ -46,14 +46,26 @@
       </div>
       <div class="tab-body" id="tab-inspector"></div>
       <div class="tab-body" id="tab-guide" hidden>
-        <p class="placeholder">The coding guide arrives in <b>Phase 5</b>. For now: place blocks, drag them around, and rename them in the Inspector. Names become Python variables later.</p>
+        <p class="placeholder">The full coding guide arrives in <b>Phase 5</b>. For now, try the terminal at the bottom:</p>
+        <pre class="insp-code">help()
+blocks
+warehouse_1.pos
+belt_1.direction = "north"
+belt_1.direction
+await wait(1); print("done")</pre>
+        <p class="placeholder">Every block is a Python variable named after it (rename it in the Inspector). Loops that never wait are refused or stopped, so they can't freeze the page.</p>
       </div>
     </aside>
   </main>
 
   <footer id="terminal">
-    <div class="term-title">Terminal <span class="dim">(Python arrives in Phase 1)</span></div>
+    <div class="term-title">Terminal <span id="term-status" data-state="loading">Python: loading…</span>
+      <span class="dim term-keys">Enter run · Shift+Enter new line · ↑↓ history · Ctrl+C stop · Ctrl+L clear</span></div>
     <div id="term-log"></div>
+    <div class="term-input-row">
+      <span id="term-prompt">&gt;&gt;&gt;</span>
+      <textarea id="term-input" rows="1" spellcheck="false" autocomplete="off"></textarea>
+    </div>
   </footer>
 
   <script type="module" src="js/main.js"></script>

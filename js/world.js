@@ -21,6 +21,7 @@ export class World {
   constructor() {
     this.money = START_MONEY;
     this.blocks = new Map(); // name -> block
+    this.nextId = 1;         // stable ids survive renames (Python keys blocks by id)
     this.listeners = new Set();
   }
 
@@ -85,7 +86,7 @@ export class World {
       return { ok: false, error: `Not enough money: a ${BLOCKS[kind].label} costs $${price}, you have $${fmt(this.money)}.` };
     }
     this.money -= price;
-    const block = { name: this.nextName(kind), kind, x, y, attrs: {} };
+    const block = { id: this.nextId++, name: this.nextName(kind), kind, x, y };
     this.blocks.set(block.name, block);
     this.emit();
     return { ok: true, block, price };
@@ -106,6 +107,14 @@ export class World {
     this.money += refund;
     this.emit();
     return { ok: true, refund };
+  }
+
+  // Plain-data copy of the layout for the Python worker.
+  snapshot() {
+    return {
+      money: this.money,
+      blocks: [...this.blocks.values()].map(({ id, name, kind, x, y }) => ({ id, name, kind, x, y })),
+    };
   }
 
   validateName(block, name) {

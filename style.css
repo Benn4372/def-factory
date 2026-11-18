@@ -24,7 +24,7 @@ html, body {
 
 body {
   display: grid;
-  grid-template-rows: auto 1fr 140px;
+  grid-template-rows: auto 1fr 220px;
   height: 100vh;
 }
 
@@ -169,7 +169,37 @@ code { font-family: var(--mono); color: var(--accent); }
 }
 .term-title { padding: 4px 12px; color: var(--dim); border-bottom: 1px solid var(--line); }
 .dim { color: #5b6170; }
-#term-log { flex: 1; overflow-y: auto; padding: 6px 12px; }
-.log-line.error { color: var(--bad); }
+.term-keys { float: right; font-size: 11px; }
+#term-status { margin-left: 8px; color: var(--money); }
+#term-status[data-state="ready"] { color: var(--good); }
+#term-status[data-state="failed"] { color: var(--bad); }
+#term-log { flex: 1; overflow-y: auto; padding: 6px 12px; white-space: pre-wrap; }
+.log-line { min-height: 1.4em; }
+.log-line.echo { color: #9aa3b5; }
+.log-line.result { color: var(--text); }
+.log-line.error, .log-line.err { color: var(--bad); }
+.log-line.refused { color: #ffa94d; }
+.log-line.sys { color: var(--money); }
 .log-line.good { color: var(--good); }
-.log-line .t { color: #5b6170; margin-right: 8px; }
+.log-line.game { color: #5b6170; }
+.log-line.game.error { color: #b55; }
+.term-input-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 12px 8px;
+  border-top: 1px solid #1d2028;
+}
+#term-prompt { color: var(--accent); padding-top: 2px; white-space: pre; }
+#term-input {
+  flex: 1;
+  resize: none;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  line-height: 1.4;
+  padding: 2px 0;
+}
+pre.insp-code { margin: 8px 0; white-space: pre-wrap; color: var(--text); }
