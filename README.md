@@ -23,8 +23,9 @@ See [DESIGN.md](DESIGN.md) for the full design and build phases.
 - `help()` lists what's available.
 
 Safety (the page should never freeze):
-- **Pre-run check:** refuses `while True` loops with no `await` and no `break`, `sleep()`, importing `js`/`pyodide`, and syntax errors, with the line number.
-- **Watchdog:** player code that runs more than 50 ms without an `await` is stopped. Recursion deeper than 150 calls is stopped. Output is capped at 200 lines per second.
+- **Pre-run check:** refuses `while True` loops with no `await` and no `break`, importing `js`/`pyodide`, and syntax errors, with the line number.
+- **Blocked functions:** `time.sleep()`, `sys.settrace()`, `sys.setprofile()` and `sys.setrecursionlimit()` raise an error however they're reached (`await asyncio.sleep()` is fine).
+- **Watchdog:** player code that runs more than 50 ms without an `await` is stopped, including background tasks you start yourself. A player `except Exception:` can't swallow the stop. Recursion deeper than 150 calls is stopped. Output is capped at 200 lines per second and results longer than 4,000 characters are cut short.
 - **Restart:** if Python gets stuck where the watchdog can't see (a loop inside C code, like `sum(range(10**11))`), the worker is restarted after 3 seconds. Terminal variables and block attributes are lost; the layout is re-sent.
 
 Block behavior (classes you write) arrives in Phase 2.

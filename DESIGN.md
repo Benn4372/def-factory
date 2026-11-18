@@ -311,13 +311,15 @@ A perfect "will this hang?" check is impossible (the halting problem), so there 
 Parse with Python's `ast` and refuse to run with a clear message and line number for:
 - Syntax errors.
 - A `while` loop whose condition is always true (`while True:`, `while 1:`) with no `await` and no `break` in its body. Other `while` loops (e.g. `while i < n`) are allowed through and left to the runtime watchdog, so legitimate finite loops aren't refused.
-- `sleep()` calls (use `await wait()`), importing `js`, `pyodide` or `micropip`, and touching `settrace` / `setprofile` / `setrecursionlimit`.
+- Importing `js`, `pyodide` or `micropip`.
+- (Not static: `time.sleep`, `sys.settrace`, `sys.setprofile` and `sys.setrecursionlimit` are replaced at runtime with functions that raise, so every route to them is covered.)
 - Programs without `async def main()`.
 - Classes whose name doesn't match the block type.
 
 ### 10.2 Runtime watchdog
 - **Time budget:** any single run of player code that executes for more than **50 ms of real time without yielding** raises `TooLongWithoutAwait` (implemented via a `sys.settrace` instruction/time check). The block halts; the program stops.
 - **Recursion limit:** 150 nested player-code calls (counted by the watchdog, so Pyodide's own stack isn't affected).
+- Watchdog stops derive from `BaseException`, so a player's `except Exception:` can't swallow them. The tracer stays armed between calls so player tasks resumed by the event loop are watched too.
 - **Output limit:** terminal print rate capped (excess lines dropped with a notice).
 - **Isolation:** Pyodide and the simulation run in a **Web Worker**. The UI thread never runs player code, so the page always stays responsive. If the worker stops responding for 3 s anyway, the UI terminates and restarts it, restoring the layout, classes, programs and instance attributes from the last snapshot (items in the world are lost) and shows a message. *(Phase 1 restores only the layout; terminal variables and block attributes are lost. Snapshotting classes, programs and instance attributes comes with Phase 2/4, when they exist.)*
 

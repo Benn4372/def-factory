@@ -122,6 +122,7 @@ export class World {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
       return 'Names must be valid Python identifiers: letters, digits and _, not starting with a digit.';
     }
+    if (name.startsWith('_')) return 'Names starting with _ are reserved for Python internals.';
     if (RESERVED.has(name)) return `"${name}" is reserved by Python or the game.`;
     if (this.blocks.has(name)) return `"${name}" is already used by another block.`;
     return null;

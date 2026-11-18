@@ -24,15 +24,42 @@ CHECK_EVERY = 32       # check the clock every N line events (keeps overhead dow
 PLAYER_PREFIXES = ("<terminal", "<class", "<program")
 
 BLOCKED_MODULES = {"js", "pyodide", "pyodide_js", "_pyodide", "micropip"}
-BLOCKED_ATTRS = {"settrace", "setprofile", "setrecursionlimit", "sleep"}
 
 
 class SafetyError(Exception):
     """Raised by check() when code is refused before running."""
 
 
-class TooLongWithoutAwait(Exception):
+# The watchdog's stops derive from BaseException so a player's
+# `except Exception:` can't swallow them and keep running untraced.
+class TooLongWithoutAwait(BaseException):
     """Raised inside player code that ran too long without yielding."""
+
+
+class RecursionTooDeep(BaseException):
+    """Raised when player code nests calls deeper than MAX_DEPTH."""
+
+
+# ------------------------------------------------- runtime guards on builtins
+# Patched once at import, so they apply however the function is reached
+# (`time.sleep`, `from time import sleep`, getattr, ...). The watchdog keeps a
+# private reference to the real settrace.
+
+import time as _time
+
+_real_settrace = sys.settrace
+
+
+def _refuse(what, hint=""):
+    def refused(*args, **kwargs):
+        raise SafetyError(f"{what} isn't allowed in player code.{hint}")
+    return refused
+
+
+_time.sleep = _refuse("sleep()", " It would freeze the factory; use `await wait(seconds)` instead.")
+sys.settrace = _refuse("sys.settrace()")
+sys.setprofile = _refuse("sys.setprofile()")
+sys.setrecursionlimit = _refuse("sys.setrecursionlimit()")
 
 
 # ---------------------------------------------------------------- static check
@@ -43,19 +70,14 @@ def check(src, filename="<terminal>"):
     except SyntaxError as e:
         line = f"line {e.lineno}: " if e.lineno else ""
         raise SafetyError(f"SyntaxError: {line}{e.msg}") from None
+    except (RecursionError, MemoryError, ValueError) as e:
+        raise SafetyError(f"this code is too complex to parse ({type(e).__name__})") from None
 
     for node in ast.walk(tree):
         if isinstance(node, ast.While):
             _check_while(node)
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             _check_import(node)
-        elif isinstance(node, ast.Attribute) and node.attr in BLOCKED_ATTRS:
-            if node.attr == "sleep":
-                raise SafetyError(
-                    f"line {node.lineno}: sleep() would freeze the factory. "
-                    "Use `await wait(seconds)` instead."
-                )
-            raise SafetyError(f"line {node.lineno}: `{node.attr}` isn't allowed in player code.")
     return tree
 
 
@@ -111,14 +133,12 @@ class Watchdog:
         self.counter = 0
 
     def arm(self):
-        """Call at every entry point into player code (re-arms after a trip,
-        because CPython unsets the tracer when a trace function raises)."""
+        """Call at every entry point into player code, and every engine step.
+        The tracer stays on between calls so background player tasks resumed
+        by the event loop are watched too; re-arming is needed after a trip,
+        because CPython unsets the tracer when a trace function raises."""
         self.depth = 0
-        sys.settrace(self._global)
-
-    def disarm(self):
-        sys.settrace(None)
-        self.depth = 0
+        _real_settrace(self._global)
 
     def _global(self, frame, event, arg):
         # Called on every new frame ('call'), including a coroutine resuming
@@ -133,7 +153,7 @@ class Watchdog:
         self.depth += 1
         if self.depth > MAX_DEPTH:
             self.depth -= 1
-            raise RecursionError(f"recursion too deep (more than {MAX_DEPTH} nested calls)")
+            raise RecursionTooDeep(f"recursion too deep (more than {MAX_DEPTH} nested calls)")
         return self._local
 
     def _local(self, frame, event, arg):

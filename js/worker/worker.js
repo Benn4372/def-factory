@@ -64,9 +64,15 @@ onmessage = async (e) => {
       break;
 
     case 'exec': {
-      const proxy = await runtime.repl(msg.code);
-      const result = proxy.toJs({ dict_converter: Object.fromEntries });
-      proxy.destroy();
+      // Always answer, or the terminal would wait forever.
+      let result;
+      try {
+        const proxy = await runtime.repl(msg.code);
+        result = proxy.toJs({ dict_converter: Object.fromEntries });
+        proxy.destroy();
+      } catch (err) {
+        result = { ok: false, kind: 'error', error: `internal error: ${String(err?.message || err).split('\n').pop()}` };
+      }
       postMessage({ type: 'result', id: msg.id, ...result });
       break;
     }

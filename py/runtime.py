@@ -144,8 +144,6 @@ _current = None  # the running terminal task, so Ctrl+C can cancel it
 
 def _format_error(e):
     """One or two readable lines: where in the player's code, and what."""
-    if isinstance(e, (SafetyError,)):
-        return str(e)
     tb = traceback.extract_tb(e.__traceback__)
     player = [f for f in tb if f.filename.startswith(safety.PLAYER_PREFIXES)]
     where = f"line {player[-1].lineno}: " if player else ""
@@ -154,12 +152,18 @@ def _format_error(e):
     return f"{where}{name}: {msg}" if msg else f"{where}{name}"
 
 
+MAX_REPR = 4000
+
+
 async def _run(src):
+    # The watchdog stays armed afterwards: tasks the player spawned keep being
+    # watched when the event loop resumes them.
     watchdog.arm()
-    try:
-        return await eval_code_async(src, G, filename="<terminal>", return_mode="last_expr")
-    finally:
-        watchdog.disarm()
+    value = await eval_code_async(src, G, filename="<terminal>", return_mode="last_expr")
+    if value is None:
+        return None
+    r = repr(value)  # may run a player __repr__, so it stays inside the watched task
+    return r if len(r) <= MAX_REPR else r[:MAX_REPR] + f"… ({len(r) - MAX_REPR} more characters)"
 
 
 async def repl(src):
@@ -173,18 +177,17 @@ async def repl(src):
     task = asyncio.ensure_future(_run(src))
     _current = task
     try:
-        value = await task
+        text = await task
     except asyncio.CancelledError:
         return {"ok": False, "kind": "cancelled", "error": "KeyboardInterrupt: stopped"}
-    except TooLongWithoutAwait as e:
+    except (TooLongWithoutAwait, SafetyError) as e:
         return {"ok": False, "kind": "watchdog", "error": _format_error(e)}
     except BaseException as e:  # noqa: BLE001 — player errors must never escape
         return {"ok": False, "kind": "error", "error": _format_error(e)}
     finally:
         _current = None
-        watchdog.disarm()
 
-    return {"ok": True, "repr": None if value is None else repr(value)}
+    return {"ok": True, "repr": text}
 
 
 def cancel():
