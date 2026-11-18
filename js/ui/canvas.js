@@ -94,11 +94,13 @@ export class GridView {
     });
 
     window.addEventListener('keydown', (e) => {
-      const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName);
+      const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)
+        || document.activeElement?.closest?.('.CodeMirror');
+      if (typing) return; // map shortcuts don't apply while typing in the terminal or an editor
       if (e.key === 'Escape') {
         if (this.ui.placing) this.ui.setPlacing(null);
         else this.ui.select(null);
-      } else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && this.ui.selected) {
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && this.ui.selected) {
         this.ui.remove(this.ui.selected);
       }
     });

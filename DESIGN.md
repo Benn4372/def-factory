@@ -1,6 +1,6 @@
 # def factory() — Proof of Concept Design Document
 
-**Status:** Draft v1 · 2026-11-18 · Phase 0 complete
+**Status:** Draft v1 · 2026-11-18 · Phases 0–1 complete
 **Platform:** Browser (GitHub Pages), vanilla JS + Pyodide
 **Scope:** Proof of concept (PoC). Future ideas are listed in §14 and are explicitly *out of scope*.
 
@@ -310,15 +310,18 @@ A perfect "will this hang?" check is impossible (the halting problem), so there 
 ### 10.1 Pre-run check (static, on save / run)
 Parse with Python's `ast` and refuse to run with a clear message and line number for:
 - Syntax errors.
-- A `while` loop with no `await` anywhere in its body (and not provably finite, e.g. not `while i < n` with `i` changing; PoC rule: any `while` without `await` and without `break` is refused).
+- A `while` loop whose condition is always true (`while True:`, `while 1:`) with no `await` and no `break` in its body. Other `while` loops (e.g. `while i < n`) are allowed through and left to the runtime watchdog, so legitimate finite loops aren't refused.
+- Importing `js`, `pyodide` or `micropip`.
+- (Not static: `time.sleep`, `sys.settrace`, `sys.setprofile` and `sys.setrecursionlimit` are replaced at runtime with functions that raise, so every route to them is covered.)
 - Programs without `async def main()`.
 - Classes whose name doesn't match the block type.
 
 ### 10.2 Runtime watchdog
 - **Time budget:** any single run of player code that executes for more than **50 ms of real time without yielding** raises `TooLongWithoutAwait` (implemented via a `sys.settrace` instruction/time check). The block halts; the program stops.
-- **Recursion limit:** 200.
+- **Recursion limit:** 150 nested player-code calls (counted by the watchdog, so Pyodide's own stack isn't affected).
+- Watchdog stops derive from `BaseException`, so a player's `except Exception:` can't swallow them. The tracer stays armed between calls so player tasks resumed by the event loop are watched too.
 - **Output limit:** terminal print rate capped (excess lines dropped with a notice).
-- **Isolation:** Pyodide and the simulation run in a **Web Worker**. The UI thread never runs player code, so the page always stays responsive. If the worker stops responding for 3 s anyway, the UI terminates and restarts it, restoring the layout, classes, programs and instance attributes from the last snapshot (items in the world are lost) and shows a message.
+- **Isolation:** Pyodide and the simulation run in a **Web Worker**. The UI thread never runs player code, so the page always stays responsive. If the worker stops responding for 3 s anyway, the UI terminates and restarts it, restoring the layout, classes, programs and instance attributes from the last snapshot (items in the world are lost) and shows a message. *(Phase 1 restores only the layout; terminal variables and block attributes are lost. Snapshotting classes, programs and instance attributes comes with Phase 2/4, when they exist.)*
 
 ### 10.3 Errors
 - A block whose hook raises turns **red**, stops firing hooks, and shows the error in the inspector and terminal. Other blocks keep running.
@@ -411,6 +414,7 @@ def-factory/
 │   │   ├── editor.js        # CodeMirror setup
 │   │   └── terminal.js
 │   ├── bridge.js            # worker messaging, watchdog, restart
+│   │   (ui/terminal.js: the REPL; py/runtime.py also holds block objects)
 │   └── worker/
 │       ├── worker.js        # entry: loads Pyodide + engine
 │       ├── engine.js        # world, clock, step loop, movement rules
@@ -442,7 +446,7 @@ Each phase ends with something playable and deployed to GitHub Pages.
 - Place / move / delete / rename blocks, money and free counts.
 - **Done when:** you can build a layout and see money change. No code runs.
 
-### Phase 1: Python runtime and safety
+### Phase 1: Python runtime and safety ✅
 - Worker + Pyodide loading screen, terminal REPL with top-level `await`, `print` routing.
 - Pre-check and watchdog, worker restart.
 - **Done when:** `while True: pass` in the terminal is refused, a sneaky infinite loop is stopped in ≤ 50 ms, and the page never freezes.

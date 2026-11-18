@@ -21,6 +21,7 @@ export class World {
   constructor() {
     this.money = START_MONEY;
     this.blocks = new Map(); // name -> block
+    this.nextId = 1;         // stable ids survive renames (Python keys blocks by id)
     this.listeners = new Set();
   }
 
@@ -85,7 +86,7 @@ export class World {
       return { ok: false, error: `Not enough money: a ${BLOCKS[kind].label} costs $${price}, you have $${fmt(this.money)}.` };
     }
     this.money -= price;
-    const block = { name: this.nextName(kind), kind, x, y, attrs: {} };
+    const block = { id: this.nextId++, name: this.nextName(kind), kind, x, y };
     this.blocks.set(block.name, block);
     this.emit();
     return { ok: true, block, price };
@@ -108,11 +109,20 @@ export class World {
     return { ok: true, refund };
   }
 
+  // Plain-data copy of the layout for the Python worker.
+  snapshot() {
+    return {
+      money: this.money,
+      blocks: [...this.blocks.values()].map(({ id, name, kind, x, y }) => ({ id, name, kind, x, y })),
+    };
+  }
+
   validateName(block, name) {
     if (name === block.name) return null;
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
       return 'Names must be valid Python identifiers: letters, digits and _, not starting with a digit.';
     }
+    if (name.startsWith('_')) return 'Names starting with _ are reserved for Python internals.';
     if (RESERVED.has(name)) return `"${name}" is reserved by Python or the game.`;
     if (this.blocks.has(name)) return `"${name}" is already used by another block.`;
     return null;
